@@ -1,0 +1,186 @@
+
+#define newSnowTimerNode(time, periodic, action) SnowTimerNode.create(time, periodic, action)
+#define miaoGetGameExpiredTimer() gameExpiredTimer
+
+library SnowTimerSystem initializer miaoInitTimerSystem
+
+	globals
+		
+		private timer mainTimer = CreateTimer()
+
+		integer gameTime = 0
+
+		integer array hashKey
+
+		private SnowTimerNode dummy
+
+		SnowTimerNode mRoot
+		SnowTimerNode gameExpiredTimer
+		
+	endglobals
+
+	public function miaoGetHashKey takes nothing returns integer
+        set hashKey[0] = hashKey[0] + 1
+        if hashKey[hashKey[0]] != 0 then
+            return hashKey[hashKey[0]]
+        else
+            return hashKey[0]
+        endif
+	endfunction
+
+    public function miaoDeleteHashKey takes integer value returns nothing
+        set hashKey[hashKey[0]] = value
+        set hashKey[0] = hashKey[0] - 1
+	endfunction
+
+	function miaoSortTimer takes SnowTimerNode this returns nothing
+        local SnowTimerNode var = dummy.miaoGetNext()
+        if var.miaoGetExpiredTime() >= this.miaoGetExpiredTime() then
+            call var.miaoSetPrev(this)
+            return
+        endif
+        set var = dummy.miaoGetPrev()
+        if var.miaoGetExpiredTime() <= this.miaoGetExpiredTime() then
+            call var.miaoSetNext(this)
+            return
+        endif
+        set var = dummy.miaoGetNext()
+        loop
+			exitwhen var == dummy
+			if var.miaoGetExpiredTime() < this.miaoGetExpiredTime() and var.miaoGetNext().miaoGetExpiredTime() > this.miaoGetExpiredTime() or var.miaoGetExpiredTime() == this.miaoGetExpiredTime() then
+                call var.miaoSetNext(this)
+                return
+            endif
+            set var = var.miaoGetNext()
+        endloop
+	endfunction
+
+	struct SnowTimerNode
+
+		private integer key
+        private integer time
+        private integer expiredTime
+        private integer pauseTime
+        private boolean periodic
+        private trigger action
+        
+        SnowTimerNode prev
+        SnowTimerNode next
+
+        static method new takes nothing returns thistype
+			local thistype class = thistype.allocate()
+			set class.prev = class
+			set class.next = class
+			return class	
+    	endmethod
+
+		static method create takes real time, boolean periodic, trigger action returns thistype
+			local thistype class = thistype.allocate()
+			set class.time = R2I(time * 100)
+            set class.periodic = periodic
+           	set class.action = action
+            set class.key = miaoGetHashKey()
+            set class.expiredTime = class.time + gameTime
+            call miaoSortTimer(class)
+			return class
+		endmethod
+
+		method destroy takes nothing returns nothing
+			set this.next.prev = this.prev
+            set this.prev.next = this.next
+            set pauseTime = 0
+            call miaoDeleteHashKey(this.key)
+		endmethod
+
+		method miaoGetKey takes nothing returns integer
+            return key
+        endmethod
+
+        method miaoGetTime takes nothing returns integer
+            return time
+        endmethod
+
+        method miaoGetExpiredTime takes nothing returns integer
+            return expiredTime
+        endmethod
+
+        method miaoGetPeriodic takes nothing returns boolean
+            return periodic
+        endmethod
+
+        method miaoGetAction takes nothing returns trigger
+            return action
+        endmethod
+            
+        method miaoGetPrev takes nothing returns SnowTimerNode
+            return prev
+        endmethod
+
+        method miaoGetNext takes nothing returns SnowTimerNode
+            return next
+        endmethod
+
+        method miaoSetPeriodic takes boolean value returns nothing
+            set periodic = value
+        endmethod
+
+       method miaoSetNext takes SnowTimerNode elem returns nothing
+            set elem.next = this.next
+            set elem.prev = this
+            set this.next.prev = elem
+            set this.next = elem
+        endmethod
+
+       method miaoSetPrev takes SnowTimerNode elem returns nothing
+            set elem.next = this
+            set elem.prev = this.prev
+            set this.prev.next = elem
+            set this.prev = elem
+        endmethod
+
+        method miaoSetExpiredTime takes integer value returns nothing
+            set expiredTime = value
+        endmethod
+        
+        method miaoGetRemainingTime takes nothing returns integer
+            return expiredTime - gameTime
+        endmethod
+        
+        method miaoGetLostTime takes nothing returns integer
+            return gameTime - (expiredTime - time)
+        endmethod
+
+	endstruct
+	
+	
+	private function miaoMainTimer takes nothing returns nothing
+		set gameTime = gameTime + 1
+		if gameTime == dummy.miaoGetNext().miaoGetExpiredTime() then
+            set mRoot = dummy.miaoGetNext()
+            loop
+				exitwhen mRoot.miaoGetExpiredTime() != gameTime
+				set gameExpiredTimer = mRoot
+                if mRoot.miaoGetPeriodic() then
+                    set mRoot.next.prev = mRoot.prev
+                    set mRoot.prev.next = mRoot.next
+                    call mRoot.miaoSetExpiredTime(mRoot.miaoGetTime() + gameTime)
+                    call miaoSortTimer(mRoot)
+                    call ExecuteFunc(mRoot.miaoGetAction())
+                else
+                    call ExecuteFunc(mRoot.miaoGetAction())
+                    call mRoot.destroy()
+                endif
+                set mRoot = dummy.miaoGetNext()
+            endloop
+            set mRoot = 0
+        endif
+	endfunction
+
+        
+	private function miaoInitTimerSystem takes nothing returns nothing
+		call TimerStart(mainTimer, 0.01, true, function miaoMainTimer)
+		set dummy = SnowTimerNode.new()
+		set mRoot = dummy 
+	endfunction
+
+endlibrary
